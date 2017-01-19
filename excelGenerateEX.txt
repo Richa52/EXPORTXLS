@@ -1,0 +1,575 @@
+using System;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Web.Http;
+using gtlLabs.Repository;
+
+using System.Web;
+using System.Web.Configuration;
+
+using NPOI.HSSF.UserModel;
+using NPOI.SS.UserModel;
+// ReSharper disable ExceptionNotDocumented
+
+namespace Web.Controllers
+{
+    public class ReportController : ApiBaseController
+    {
+        #region Initialization Constructor
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="ReportController"/> class.
+        /// </summary>
+        /// <param name="appuow">The appuow.</param>
+        /// <param name="uow">The uow.</param>
+        public ReportController(iArchUOW appuow, iRepositoryProvider uow)
+        {
+            AppUow = appuow;
+            Uow = uow;
+        }
+
+        #endregion
+
+        /// <summary>
+        /// Gets all requests.
+        /// </summary>
+        /// <returns></returns>
+        [HttpGet]
+        [ActionName(WebConstant.GetAllRequests)]
+        public dynamic GetAllRequests()
+        {
+            var conceptId = new Guid(Convert.ToString(ApiConstant.ConceptId));
+            var active = new Guid(Convert.ToString(ApiConstant.GeneralStatus_Active));
+            var request =
+                Uow.Repository<vGetRequestsForReport>()
+                    .FindBy(
+                        x =>
+                            x.ConceptID == conceptId && x.RequestStatusId == active).OrderByDescending(x => x.CreatedOn)
+                    .ToList();
+            // Removed Closed Status from Generic List
+            var allRequestStatus = Uow.Repository<vRequestStatus>().All().OrderBy(x => x.StatusName).Where(x=>x.StatusName != "Closed").ToList();
+            return new { request, allRequestStatus };
+        }
+
+
+        [HttpGet]
+        public string ExportXls(string status, string fromdate, string todate)
+        {
+            var workbook = new HSSFWorkbook();
+            
+            var conceptId = new Guid(Convert.ToString(ApiConstant.ConceptId));
+            var active = new Guid(Convert.ToString(ApiConstant.GeneralStatus_Active));
+
+            var request =
+                Uow.Repository<vGetRequestsForReport>()
+                    .FindBy(
+                        x =>
+                            x.ConceptID == conceptId && x.RequestStatusId == active).OrderByDescending(x => x.CreatedOn)
+                    .ToList();
+
+            var solution =
+                Uow.Repository<vGetRequestSolutionsForReport>()
+                    .FindBy(
+                        x =>
+                            x.ConceptID == conceptId && x.RequestStatusId == active).OrderByDescending(x => x.CreatedOn)
+                    .ToList();
+
+            var appointments =
+                Uow.Repository<vGetRequestAppointmentsForReport>()
+                    .FindBy(
+                        x =>
+                            x.ConceptID == conceptId && x.RequestStatusId == active).OrderByDescending(x => x.CreatedOn)
+                    .ToList();
+
+            var reviews =
+                Uow.Repository<vGetRequestReviewsForReport>()
+                    .FindBy(
+                        x =>
+                            x.ConceptID == conceptId && x.RequestStatusId == active).OrderByDescending(x => x.ReviewDate)
+                    .ToList();
+
+            if (status != WebConstant.GeneralNullString)
+            { 
+                request = request.Where(x => status.Contains(x.RequestStatusName)).ToList();
+                solution = solution.Where(x => status.Contains(x.RequestStatusName)).ToList();
+                appointments = appointments.Where(x => status.Contains(x.RequestStatusName)).ToList();
+                reviews = reviews.Where(x => status.Contains(x.RequestStatusName)).ToList();
+            }
+            if (fromdate != WebConstant.GeneralUndefinedString)
+            {
+                var from = DateTime.ParseExact(fromdate, WebConstant.ReportDateFormat, CultureInfo.InvariantCulture);
+                request = request.Where(x => x.CreatedOn >= from).ToList();
+                solution = solution.Where(x => x.CreatedOn >= from).ToList();
+                appointments = appointments.Where(x => x.CreatedOn >= from).ToList();
+                reviews = reviews.Where(x => x.CreatedOn >= from).ToList();
+            }
+            if (todate != WebConstant.GeneralUndefinedString)
+            {
+                var to = DateTime.ParseExact(todate, WebConstant.ReportDateFormat, CultureInfo.InvariantCulture);
+                to = to.Date.AddHours(23).AddMinutes(59).AddSeconds(59);
+                request = request.Where(x => x.CreatedOn <= to).ToList();
+                solution = solution.Where(x => x.CreatedOn <= to).ToList();
+                appointments = appointments.Where(x => x.CreatedOn <= to).ToList();
+                reviews = reviews.Where(x => x.CreatedOn <= to).ToList();
+            }
+
+            #region -- General Styles --
+
+            // Set Cell style, Font, Alignment and other HTML Attributes
+            var titleCellStyle = workbook.CreateCellStyle();
+            titleCellStyle.Alignment = HorizontalAlignment.Center;
+            var titlefont = workbook.CreateFont();
+            titlefont.Boldweight = (short)FontBoldWeight.Bold;
+            titleCellStyle.SetFont(titlefont);
+
+            // workbook CreateCellStyle
+            var numericStyle = workbook.CreateCellStyle();
+            numericStyle.Alignment = HorizontalAlignment.Right;
+
+            // workbook CreateCellStyle
+            var totalStyle = workbook.CreateCellStyle();
+            totalStyle.Alignment = HorizontalAlignment.Right;
+
+            // workbook CreateFont
+            var totalfont = workbook.CreateFont();
+            totalfont.Boldweight = (short)FontBoldWeight.Bold;
+            totalStyle.SetFont(totalfont);
+
+            // workbook CreateCellStyle
+            var panelrowStyle = workbook.CreateCellStyle();
+            panelrowStyle.Alignment = HorizontalAlignment.Left;
+
+            // workbook CreateFont
+            var panlestylefont = workbook.CreateFont();
+            panlestylefont.Boldweight = (short)FontBoldWeight.Bold;
+            panlestylefont.FontHeightInPoints = 11;
+            panelrowStyle.SetFont(panlestylefont);
+
+            // workbook CreateCellStyle
+            var headerLabelCellStyle = workbook.CreateCellStyle();
+            headerLabelCellStyle.Alignment = HorizontalAlignment.Left;
+
+            // workbook CreateFont
+            var headerLabelFont = workbook.CreateFont();
+            headerLabelFont.Boldweight = (short)FontBoldWeight.Bold;
+            headerLabelFont.FontHeightInPoints = 11;
+            headerLabelCellStyle.SetFont(headerLabelFont);
+
+            var noStyle = workbook.CreateCellStyle();
+
+            var noStyleFont = workbook.CreateFont();
+            noStyleFont.FontHeightInPoints = 11;
+
+            noStyle.SetFont(noStyleFont);
+
+            //creating cell borders for adding table like effect
+            var borderStyle = workbook.CreateCellStyle();
+            borderStyle.BorderBottom = BorderStyle.Thin;
+            borderStyle.BorderTop = BorderStyle.Thin;
+            borderStyle.BorderLeft = BorderStyle.Thin;
+            borderStyle.BorderRight = BorderStyle.Thin;
+
+            // workbook CreateFont
+            var borderFont = workbook.CreateFont();
+            borderFont.FontHeightInPoints = 11;
+
+            borderStyle.SetFont(borderFont);
+
+            ////! Creating fonts for datetime
+            //var borderStyleForDateTime = workbook.CreateCellStyle();
+            //borderStyleForDateTime.BorderBottom = BorderStyle.Thin;
+            //borderStyleForDateTime.BorderTop = BorderStyle.Thin;
+            //borderStyleForDateTime.BorderLeft = BorderStyle.Thin;
+            //borderStyleForDateTime.BorderRight = BorderStyle.Thin;
+
+            //// workbook CreateFont for datetime
+            //var borderFontForDateTime = workbook.CreateFont();
+            //borderFontForDateTime.FontHeightInPoints = 11;
+
+            //// New Data format for DateTime
+            //var newDataFormat = workbook.CreateDataFormat();
+            //borderStyleForDateTime.SetFont(borderFontForDateTime);
+            //borderStyleForDateTime.DataFormat = newDataFormat.GetFormat("MM/dd/yyyy HH:mm:ss");
+
+            //! Creating fonts for date
+            var borderStyleForDate = workbook.CreateCellStyle();
+            borderStyleForDate.BorderBottom = BorderStyle.Thin;
+            borderStyleForDate.BorderTop = BorderStyle.Thin;
+            borderStyleForDate.BorderLeft = BorderStyle.Thin;
+            borderStyleForDate.BorderRight = BorderStyle.Thin;
+
+            // workbook CreateFont for datetime
+            var borderFontForDate = workbook.CreateFont();
+            borderFontForDate.FontHeightInPoints = 11;
+
+            // New Data format for DateTime
+            var newDataFormatForDate = workbook.CreateDataFormat();
+            borderStyleForDate.SetFont(borderFontForDate);
+            borderStyleForDate.DataFormat = newDataFormatForDate.GetFormat("MM/dd/yyyy");
+
+            //! Creating fonts for Time
+            var borderStyleForTime = workbook.CreateCellStyle();
+            borderStyleForTime.BorderBottom = BorderStyle.Thin;
+            borderStyleForTime.BorderTop = BorderStyle.Thin;
+            borderStyleForTime.BorderLeft = BorderStyle.Thin;
+            borderStyleForTime.BorderRight = BorderStyle.Thin;
+
+            // workbook CreateFont for datetime
+            var borderFontForTime = workbook.CreateFont();
+            borderFontForTime.FontHeightInPoints = 11;
+
+            // New Data format for DateTime
+            var newDataFormatForTime = workbook.CreateDataFormat();
+            borderStyleForTime.SetFont(borderFontForTime);
+            borderStyleForTime.DataFormat = newDataFormatForTime.GetFormat("HH:mm:ss");
+
+            var headerLabelBorderCellStyle = workbook.CreateCellStyle();
+            headerLabelBorderCellStyle.BorderBottom = BorderStyle.Thin;
+            headerLabelBorderCellStyle.BorderTop = BorderStyle.Thin;
+            headerLabelBorderCellStyle.BorderLeft = BorderStyle.Thin;
+            headerLabelBorderCellStyle.BorderRight = BorderStyle.Thin;
+            headerLabelBorderCellStyle.Alignment = HorizontalAlignment.Left;
+            headerLabelBorderCellStyle.SetFont(panlestylefont);
+            headerLabelBorderCellStyle.FillForegroundColor = IndexedColors.Grey25Percent.Index;
+            headerLabelBorderCellStyle.FillPattern = FillPattern.SolidForeground;
+
+            #endregion
+
+            #region -- Sheet 1 - Request Details --
+            //Create new Excel sheet 1
+            var sheet1 = workbook.CreateSheet("Request Details");
+
+            // Creating Row in sheet
+            var searchRowSheet1 = sheet1.CreateRow(0);
+            var rwSheet1 = 0;
+            foreach (var requestHeader in Enum.GetValues(typeof(CommonEnum.RequestReport)))
+            {
+                var searchCell = searchRowSheet1.CreateCell(rwSheet1);
+                searchCell.SetCellValue(requestHeader.ToString());
+                searchCell.CellStyle = headerLabelBorderCellStyle;
+                rwSheet1++;
+            }
+            sheet1.CreateFreezePane(0, 2);
+
+            int rowNumberSheet1 = 2;
+
+            foreach (var req in request)
+            {
+                var row = sheet1.CreateRow(rowNumberSheet1++);
+                row.CreateCell(0).SetCellValue(req.RequestNumber);
+                row.Cells[0].CellStyle = borderStyle;
+                row.CreateCell(1).SetCellValue(req.RequestSubject);
+                row.Cells[1].CellStyle = borderStyle;
+                row.CreateCell(2).SetCellValue(req.Description);
+                row.Cells[2].CellStyle = borderStyle;
+                row.CreateCell(3).SetCellValue(req.InternalBranchDescription);
+                row.Cells[3].CellStyle = borderStyle;
+                row.CreateCell(4).SetCellValue(req.RequestInternalDescription);
+                row.Cells[4].CellStyle = borderStyle;
+                row.CreateCell(5).SetCellValue(req.RequestCategory);
+                row.Cells[5].CellStyle = borderStyle;
+                row.CreateCell(6).SetCellValue(req.Priority);
+                row.Cells[6].CellStyle = borderStyle;
+                row.CreateCell(7).SetCellValue(req.Location);
+                row.Cells[7].CellStyle = borderStyle;
+
+                row.CreateCell(8).SetCellValue(req.Address);
+                row.Cells[8].CellStyle = borderStyle;
+                row.CreateCell(9).SetCellValue(req.LPNumber);
+                row.Cells[9].CellStyle = borderStyle;
+                row.CreateCell(10).SetCellValue(req.Vehicle);
+                row.Cells[10].CellStyle = borderStyle;
+                row.CreateCell(11).SetCellValue(req.AgentName);
+                row.Cells[11].CellStyle = borderStyle;
+                row.CreateCell(12).SetCellValue(req.EndUserAutoId.Value);
+                row.Cells[12].CellStyle = borderStyle;
+                row.CreateCell(13).SetCellValue(req.CustomerGUID.ToString());
+                row.Cells[13].CellStyle = borderStyle;
+                row.CreateCell(14).SetCellValue(req.CustomerName);
+                row.Cells[14].CellStyle = borderStyle;
+                row.CreateCell(15).SetCellValue(req.FirstName);
+                row.Cells[15].CellStyle = borderStyle;
+                row.CreateCell(16).SetCellValue(req.LastName);
+                row.Cells[16].CellStyle = borderStyle;
+                row.CreateCell(17).SetCellValue(req.Email);
+                row.Cells[17].CellStyle = borderStyle;
+                row.CreateCell(18).SetCellValue(req.Mobile);
+                row.Cells[18].CellStyle = borderStyle;
+                row.CreateCell(19).SetCellValue(req.ClientCategory);
+                row.Cells[19].CellStyle = borderStyle;
+                if (req.CreatedOn != null)
+                {
+                    // Date and Time Seperated 
+                    row.CreateCell(20).SetCellValue(req.CreatedOn.Value);
+                    row.Cells[20].CellStyle = borderStyleForDate;
+                    row.CreateCell(21).SetCellValue(req.CreatedOn.Value);
+                    row.Cells[21].CellStyle = borderStyleForTime;
+                }
+                else
+                {
+                    // Date and Time Seperated 
+                    row.CreateCell(20).SetCellValue("-");
+                    row.Cells[20].CellStyle = borderStyle;
+                    row.CreateCell(21).SetCellValue("-");
+                    row.Cells[21].CellStyle = borderStyle;
+                } 
+
+                row.CreateCell(22).SetCellValue(req.RequestStatusReason);
+                row.Cells[22].CellStyle = borderStyle;
+                row.CreateCell(23).SetCellValue(req.RequestStatusName);
+                row.Cells[23].CellStyle = borderStyle;
+            }
+
+            //setting the width of all columns to automatic
+            for (int i = 0; i < 24; i++)
+            {
+                sheet1.AutoSizeColumn(i);
+            }
+            #endregion
+
+            #region -- Sheet 2 - Solution Details --
+            //Create new Excel sheet 2
+            var sheet2 = workbook.CreateSheet("Solution Details");
+
+            // Creating Row in sheet
+            var searchRowSheet2 = sheet2.CreateRow(0);
+            var rwSheet2 = 0;
+            foreach (var solutionHeader in Enum.GetValues(typeof(CommonEnum.SolutionReport)))
+            {
+                var searchCell = searchRowSheet2.CreateCell(rwSheet2);
+                searchCell.SetCellValue(Utility.EnumHelper<CommonEnum.SolutionReport>.GetEnumDescription(solutionHeader.ToString()));
+                searchCell.CellStyle = headerLabelBorderCellStyle;
+                rwSheet2++;
+            }
+            sheet2.CreateFreezePane(0, 2);
+
+            int rowNumberSheet2 = 2;
+
+            foreach (var sol in solution)
+            {
+                var row = sheet2.CreateRow(rowNumberSheet2++);
+                row.CreateCell(0).SetCellValue(sol.RequestNumber.Value);
+                row.Cells[0].CellStyle = borderStyle;
+                row.CreateCell(1).SetCellValue(sol.RequestSubject);
+                row.Cells[1].CellStyle = borderStyle;
+                row.CreateCell(2).SetCellValue(sol.LPNumber);
+                row.Cells[2].CellStyle = borderStyle;
+                row.CreateCell(3).SetCellValue(sol.CustomerGUID.ToString());
+                row.Cells[3].CellStyle = borderStyle;
+                row.CreateCell(4).SetCellValue(sol.Email);
+                row.Cells[4].CellStyle = borderStyle;
+                row.CreateCell(5).SetCellValue(sol.Address);
+                row.Cells[5].CellStyle = borderStyle;
+                row.CreateCell(6).SetCellValue(sol.BranchGUID.ToString());
+                row.Cells[6].CellStyle = borderStyle;
+                row.CreateCell(7).SetCellValue(sol.BranchName);
+                row.Cells[7].CellStyle = borderStyle;
+                row.CreateCell(8).SetCellValue(sol.Vehicle);
+                row.Cells[8].CellStyle = borderStyle;
+                row.CreateCell(9).SetCellValue(sol.CustomerName);
+                row.Cells[9].CellStyle = borderStyle;
+                if (sol.CreatedOn != null)
+                {
+                    row.CreateCell(10).SetCellValue(sol.CreatedOn.Value);
+                    row.Cells[10].CellStyle = borderStyleForDate;
+                    row.CreateCell(11).SetCellValue(sol.CreatedOn.Value);
+                    row.Cells[11].CellStyle = borderStyleForTime;
+                }
+                else
+                {
+                    row.CreateCell(10).SetCellValue("");
+                    row.Cells[10].CellStyle = borderStyle;
+                    row.CreateCell(11).SetCellValue("");
+                    row.Cells[11].CellStyle = borderStyle;
+                }
+                row.CreateCell(12).SetCellValue(sol.Priority);
+                row.Cells[12].CellStyle = borderStyle;
+                row.CreateCell(13).SetCellValue(sol.RequestStatusName);
+                row.Cells[13].CellStyle = borderStyle;
+                row.CreateCell(14).SetCellValue(sol.SolutionStatusName);
+                row.Cells[14].CellStyle = borderStyle;
+                if (!string.IsNullOrEmpty(sol.TotalPrice.ToString()))
+                {
+                    row.CreateCell(15).SetCellValue(Convert.ToDouble(sol.TotalPrice.Value));
+                }
+                else
+                {
+                    row.CreateCell(15).SetCellValue("-");
+                }
+                row.Cells[15].CellStyle = borderStyle;
+                row.CreateCell(16).SetCellValue(sol.BranchUser);
+                row.Cells[16].CellStyle = borderStyle;
+                if (sol.CompletedOn != null)
+                {
+                    row.CreateCell(17).SetCellValue(sol.CompletedOn.Value);
+                    row.Cells[17].CellStyle = borderStyleForDate;
+                    row.CreateCell(18).SetCellValue(sol.CompletedOn.Value);
+                    row.Cells[18].CellStyle = borderStyleForTime;
+                }
+                else
+                {
+                    row.CreateCell(17).SetCellValue("-");
+                    row.Cells[17].CellStyle = borderStyle;
+                    row.CreateCell(18).SetCellValue("-");
+                    row.Cells[18].CellStyle = borderStyle;
+                }
+            }
+
+            //setting the width of all columns to automatic
+            for (int i = 0; i < 19; i++)
+            {
+                sheet2.AutoSizeColumn(i);
+            }
+            #endregion
+
+            #region -- Sheet 3 - Appointment Details --
+            //Create new Excel sheet 3
+            var sheet3 = workbook.CreateSheet("Appointment Details");
+
+            // Creating Row in sheet
+            var searchRowsheet3 = sheet3.CreateRow(0);
+            var rwsheet3 = 0;
+            foreach (var solutionHeader in Enum.GetValues(typeof(CommonEnum.AppointmentReport)))
+            {
+                var searchCell = searchRowsheet3.CreateCell(rwsheet3);
+                searchCell.SetCellValue(solutionHeader.ToString());
+                searchCell.CellStyle = headerLabelBorderCellStyle;
+                rwsheet3++;
+            }
+            sheet3.CreateFreezePane(0, 2);
+
+            int rowNumbersheet3 = 2;
+
+            foreach (var app in appointments)
+            {
+                var row = sheet3.CreateRow(rowNumbersheet3++);
+                row.CreateCell(0).SetCellValue(app.RequestNumber.Value);
+                row.Cells[0].CellStyle = borderStyle;
+                row.CreateCell(1).SetCellValue(app.RequestSubject);
+                row.Cells[1].CellStyle = borderStyle;
+                row.CreateCell(2).SetCellValue(app.LPNumber);
+                row.Cells[2].CellStyle = borderStyle;
+                row.CreateCell(3).SetCellValue(app.CustomerGUID.ToString());
+                row.Cells[3].CellStyle = borderStyle;
+                row.CreateCell(4).SetCellValue(app.Email);
+                row.Cells[4].CellStyle = borderStyle;
+                row.CreateCell(5).SetCellValue(app.Address);
+                row.Cells[5].CellStyle = borderStyle;
+                row.CreateCell(6).SetCellValue(app.BranchGUID.ToString());
+                row.Cells[6].CellStyle = borderStyle;
+                if (app.AppointmentOn != null)
+                {
+                    row.CreateCell(7).SetCellValue(app.AppointmentOn.Value);
+                    row.Cells[7].CellStyle = borderStyleForDate;
+                    row.CreateCell(8).SetCellValue(app.AppointmentOn.Value);
+                    row.Cells[8].CellStyle = borderStyleForTime;
+                }
+                else
+                {
+                    row.CreateCell(7).SetCellValue("-");
+                    row.Cells[7].CellStyle = borderStyle;
+                    row.CreateCell(8).SetCellValue("-");
+                    row.Cells[8].CellStyle = borderStyle;
+                }
+                row.CreateCell(9).SetCellValue(app.IsAccepted);
+                row.Cells[9].CellStyle = borderStyle;
+                row.CreateCell(10).SetCellValue(app.BranchName);
+                row.Cells[10].CellStyle = borderStyle;
+                if (!string.IsNullOrEmpty(app.TotalPrice.ToString()))
+                {
+                    row.CreateCell(11).SetCellValue(Convert.ToDouble(app.TotalPrice.Value));
+                }
+                else
+                {
+                    row.CreateCell(11).SetCellValue("-");
+                }
+                row.Cells[11].CellStyle = borderStyle;
+            }
+
+            //setting the width of all columns to automatic
+            for (int i = 0; i < 12; i++)
+            {
+                sheet3.AutoSizeColumn(i);
+            }
+            #endregion
+
+            #region -- Sheet 4 - Review Details --
+            //Create new Excel sheet 4
+            var sheet4 = workbook.CreateSheet("Review Details");
+
+            // Creating Row in sheet
+            var searchRowsheet4 = sheet4.CreateRow(0);
+            var rwsheet4 = 0;
+            foreach (var solutionHeader in Enum.GetValues(typeof(CommonEnum.ReviewReport)))
+            {
+                var searchCell = searchRowsheet4.CreateCell(rwsheet4);
+                searchCell.SetCellValue(solutionHeader.ToString());
+                searchCell.CellStyle = headerLabelBorderCellStyle;
+                rwsheet4++;
+            }
+            sheet4.CreateFreezePane(0, 2);
+
+            int rowNumbersheet4 = 2;
+
+            foreach (var review in reviews)
+            {
+                var row = sheet4.CreateRow(rowNumbersheet4++);
+                row.CreateCell(0).SetCellValue(review.RequestNumber);
+                row.Cells[0].CellStyle = borderStyle;
+                row.CreateCell(1).SetCellValue(review.LPNumber);
+                row.Cells[1].CellStyle = borderStyle;
+                row.CreateCell(2).SetCellValue(review.Rating.Value);
+                row.Cells[2].CellStyle = borderStyle;
+                row.CreateCell(3).SetCellValue(review.Review);
+                row.Cells[3].CellStyle = borderStyle;
+                row.CreateCell(4).SetCellValue(review.Response);
+                row.Cells[4].CellStyle = borderStyle;
+                if (review.ReviewDate != null)
+                {
+                    row.CreateCell(5).SetCellValue(review.ReviewDate.Value);
+                    row.Cells[5].CellStyle = borderStyleForDate;
+                    row.CreateCell(6).SetCellValue(review.ReviewDate.Value);
+                    row.Cells[6].CellStyle = borderStyleForTime;
+                }
+                else
+                {
+                    row.CreateCell(5).SetCellValue("-");
+                    row.Cells[5].CellStyle = borderStyle;
+                    row.CreateCell(6).SetCellValue("-");
+                    row.Cells[6].CellStyle = borderStyle;
+                }
+            }
+
+            //setting the width of all columns to automatic
+            for (int i = 0; i < 11; i++)
+            {
+                sheet4.AutoSizeColumn(i);
+            }
+            #endregion
+
+            //Write the workbook to a memory stream
+            var output = new MemoryStream();
+            workbook.Write(output);
+            byte[] buffer;
+            using (MemoryStream ms = new MemoryStream())
+            {
+                output.CopyTo(ms);
+                buffer = output.ToArray();
+            }
+            //Garbage Collection
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+
+            var fileName = "Requests_Report";
+            string tempFilePath = HttpContext.Current.Server.MapPath("/Files" + "/" + fileName + ".xls");
+            string downloadPath = WebConfigurationManager.AppSettings["BaseWebUrl"] + "/Files" + "/" + fileName + ".xls";
+            // File write all Bytes
+            File.WriteAllBytes(tempFilePath, buffer);
+
+            return downloadPath;
+        }
+    }
+}
+Contact GitHub API Training Shop Blog About
+© 2017 GitHub, Inc. Terms Privacy Security Status Help
