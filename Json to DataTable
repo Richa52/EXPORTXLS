@@ -1,0 +1,27 @@
+  
+ string ExportXLSDataList = ""; // json in string format
+ DataTable dtValue = (DataTable)JsonConvert.DeserializeObject(ExportXLSDataList, (typeof(DataTable)));
+ DataTable dtSubHistoryValue = Tabulate(ExportXLSDataList);
+  // For History Sub Json to DataTable
+        public static DataTable Tabulate(string json)
+        {
+            //var jsonLinq = JObject.Parse(json);
+            JArray jsonLinq = JArray.Parse(json);
+            // Find the first array using Linq
+            var srcArray = jsonLinq.Descendants().Where(d => d is JArray).First();
+            var trgArray = new JArray();
+            foreach (JObject row in srcArray.Children<JObject>())
+            {
+                var cleanRow = new JObject();
+                foreach (JProperty column in row.Properties())
+                {
+                    // Only include JValue types
+                    if (column.Value is JValue)
+                    {
+                        cleanRow.Add(column.Name, column.Value);
+                    }
+                }
+                trgArray.Add(cleanRow);
+            }
+            return JsonConvert.DeserializeObject<DataTable>(trgArray.ToString());
+        }
