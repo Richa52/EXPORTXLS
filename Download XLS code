@@ -44,7 +44,7 @@
         }
 
 
-[HttpPost]
+  [HttpPost]
         public ActionResult ExportXLS()
         {
             try
@@ -118,19 +118,20 @@
                 row.CreateCell(30).SetCellValue("Responsible TK Name");
                 row.CreateCell(31).SetCellValue("Sticky Note");
 
-                foreach (var item in row.Cells)
+                foreach (var itemStyle in row.Cells)
                 {
-                    item.CellStyle = rowCellStyleMainHeader;
+                    itemStyle.CellStyle = rowCellStyleMainHeader;
                 }
 
                 #endregion
 
                 #region LOOP ROW DATA
 
-                rowIndex++;
-                row = sheet.CreateRow(rowIndex);
+               
                 foreach (var item in responseDocket.docketItemsList)
                 {
+                    rowIndex++;
+                    row = sheet.CreateRow(rowIndex);
                     row.CreateCell(0).SetCellValue(item.actionDate);
                     row.CreateCell(1).SetCellValue(item.actionName);
                     row.CreateCell(2).SetCellValue(item.applicationDate);
@@ -177,6 +178,11 @@
                     rowsub.CreateCell(6).SetCellValue("Selected Date");
                     rowsub.CreateCell(7).SetCellValue("Status");
 
+                    foreach (var subitemStyle in rowsub.Cells)
+                    {
+                        subitemStyle.CellStyle = rowCellStyleMainHeader;
+                    }
+
                     //// Data of Sub History
                     foreach (var subitem in item.docketItemActionHistoryList)
                     {
@@ -192,24 +198,4 @@
                         sheet.GroupRow(rowIndex, rowIndex + (item.docketItemActionHistoryList.Count));
                         sheet.SetRowGroupCollapsed(rowIndex, true);
                     }
-
                 }
-
-                #endregion
-
-                #region Download XLS
-
-                string strFileName = "Docket_" + Guid.NewGuid() + ".xls";
-                MemoryStream output = new MemoryStream();
-                workbook.Write(output);
-                LogWriter.Instance.WriteToLog(strFileName + " File Successfully Downloaded.. ");
-                return File(output.ToArray(), "application/vnd.ms-excel", strFileName);
-
-                #endregion
-            }
-            catch (Exception e)
-            {
-                LogWriter.Instance.WriteToLog("Exception Occure!! " + e.Message);
-                return null;
-            }
-        }
